@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "steam-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  // nodejs_compat: required by the MCP SDK.
+  // global_fetch_strictly_public: required for Client ID Metadata Documents (SSRF protection).
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "observability": { "enabled": true },
+  "vars": {
+    // Comma-separated GitHub logins allowed to sign in. Empty = ANYONE can sign in.
+    "ALLOWED_GITHUB_LOGINS": "CHANGE_ME"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "c14d99f88bf8442787fd5cbf7ce4600c"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "steam-mcp",
+  "version": "0.1.0",
+  "description": "Remote MCP server exposing Steam library, achievements and stats. Cloudflare Workers + OAuth 2.1 via GitHub.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8788",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "build:check": "wrangler deploy --dry-run --outdir=.bundle",
+    "tail": "wrangler tail",
+    "inspector": "npx @modelcontextprotocol/inspector@latest"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
+    "agents": "^0.22.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260907.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.129.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
