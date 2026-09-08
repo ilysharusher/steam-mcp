@@ -9,7 +9,7 @@
   "observability": { "enabled": true },
   "vars": {
     // Comma-separated GitHub logins allowed to sign in. Empty = ANYONE can sign in.
-    "ALLOWED_GITHUB_LOGINS": "CHANGE_ME"
+    "ALLOWED_GITHUB_LOGINS": "ilysharusher"
   },
   "kv_namespaces": [
     {
