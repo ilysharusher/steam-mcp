@@ -17,7 +17,7 @@ export class SteamMcp extends WorkerEntrypoint<Env, Props> {
   async fetch(request: Request): Promise<Response> {
     const handler = createMcpHandler(
       () => {
-        const server = new McpServer({ name: "steam-mcp", version: "0.1.0" });
+        const server = new McpServer({ name: "steam-mcp", version: "0.1.1" });
         registerTools(server, {
           apiKey: this.env.STEAM_API_KEY,
           steamId: this.env.STEAM_ID,

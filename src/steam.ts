@@ -67,10 +67,40 @@ export function storeDetails(appid: number, cc: string) {
   return getJson<Record<string, { success: boolean; data?: AppDetails }>>(url);
 }
 
-export function wishlistData(steamId: string) {
-  const url = new URL(`${STORE}/wishlist/profiles/${steamId}/wishlistdata/`);
-  url.searchParams.set("p", "0");
-  return getJson<Record<string, WishlistItem>>(url);
+/**
+ * Wishlist contents. The storefront path `/wishlist/profiles/<id>/wishlistdata/`
+ * is dead — Valve now 302s it to HTML — so this goes through the documented
+ * service instead. It returns appids only; names and prices come from
+ * storeItems().
+ */
+export function wishlist(cfg: SteamConfig) {
+  return api<{ response: { items?: WishlistEntry[] } }>(
+    cfg,
+    "IWishlistService/GetWishlist/v1/",
+    { steamid: cfg.steamId },
+  );
+}
+
+/**
+ * Names, prices and release state for many appids in one request. This is what
+ * keeps wishlist enrichment at a single subrequest instead of one per game.
+ * Takes no key; the payload goes in `input_json`.
+ */
+export function storeItems(appids: number[], cc: string) {
+  const url = new URL(`${API}/IStoreBrowseService/GetItems/v1/`);
+  url.searchParams.set(
+    "input_json",
+    JSON.stringify({
+      ids: appids.map((appid) => ({ appid })),
+      context: { language: "english", country_code: cc.toUpperCase() },
+      data_request: {
+        include_basic_info: true,
+        include_release: true,
+        include_all_purchase_options: true,
+      },
+    }),
+  );
+  return getJson<{ response: { store_items?: StoreItem[] } }>(url);
 }
 
 /** Run an async mapper over items in small batches to respect the connection cap. */
@@ -109,11 +139,25 @@ export interface AppDetails {
   categories?: Array<{ description: string }>;
 }
 
-export interface WishlistItem {
-  name: string;
-  release_string?: string;
-  review_score?: number;
-  subs?: Array<{ price?: number; discount_pct?: number }>;
+export interface WishlistEntry {
+  appid: number;
+  /** 1 is the most wanted; 0 means the entry was never prioritised. */
+  priority?: number;
+  date_added?: number;
+}
+
+/** The subset of IStoreBrowseService/GetItems this server reads. */
+export interface StoreItem {
+  appid: number;
+  name?: string;
+  is_free?: boolean;
+  release?: { steam_release_date?: number; is_coming_soon?: boolean };
+  /** Absent for free and unreleased titles; discount fields appear only on sale. */
+  best_purchase_option?: {
+    formatted_final_price?: string;
+    formatted_original_price?: string;
+    discount_pct?: number;
+  };
 }
 
 export interface PlayerAchievement {
