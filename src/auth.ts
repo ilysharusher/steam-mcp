@@ -8,10 +8,15 @@
  *                       complete authorization, redirect back to the client
  *
  * The pending authorization request travels in a signed `state` parameter
- * rather than a cookie: no cookie parsing, and nothing to leak if a redirect
- * is replayed, because the HMAC covers the whole payload.
+ * rather than a cookie: no cookie parsing, and nothing to leak if a redirect is
+ * replayed, because the HMAC covers the whole payload. The envelope also carries
+ * an issue time, so a captured state stops being usable after STATE_TTL_MS.
  */
-import { AuthorizationError, type AuthRequest } from "@cloudflare/workers-oauth-provider";
+import {
+  AuthorizationError,
+  type AuthRequest,
+  CimdFetchError,
+} from "@cloudflare/workers-oauth-provider";
 import type { Env, Props } from "./types";
 
 const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
@@ -19,6 +24,15 @@ const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
 const GITHUB_USER = "https://api.github.com/user";
 
 const encoder = new TextEncoder();
+
+/** How long a signed authorization request stays usable. Bounds replay. */
+const STATE_TTL_MS = 10 * 60_000;
+
+/** What travels through GitHub in `state`: the pending request plus its age. */
+interface StateEnvelope {
+  r: AuthRequest;
+  iat: number;
+}
 
 function b64url(bytes: Uint8Array): string {
   let s = "";
@@ -50,20 +64,37 @@ async function sign(payload: string, secret: string): Promise<string> {
 async function verify(token: string, secret: string): Promise<string | null> {
   const idx = token.lastIndexOf(".");
   if (idx < 0) return null;
+  // atob throws on non-base64. This runs on unauthenticated input, so a bad
+  // signature has to read as "invalid", not as a 500.
+  let sig: Uint8Array;
+  try {
+    sig = unb64url(token.slice(idx + 1));
+  } catch {
+    return null;
+  }
   const payload = token.slice(0, idx);
-  const ok = await crypto.subtle.verify(
-    "HMAC",
-    await hmacKey(secret),
-    unb64url(token.slice(idx + 1)),
-    encoder.encode(payload),
-  );
+  const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, encoder.encode(payload));
   return ok ? payload : null;
 }
 
+/**
+ * The consent form is the only human gate in this flow. Without this check a
+ * cross-site auto-submitting form walks straight through it and the resulting
+ * code lands on the attacker's redirect_uri — PKCE does not help, because the
+ * attacker generated the challenge. Browsers always send Origin on a form POST,
+ * so the absence of both signals is treated as suspicious rather than fine.
+ */
+function isSameOrigin(request: Request, url: URL): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site) return site === "same-origin";
+  return request.headers.get("origin") === url.origin;
+}
+
 function page(title: string, body: string, status = 200): Response {
+  const safeTitle = escapeHtml(title);
   return new Response(
     `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
+<title>${safeTitle}</title>
 <style>
  body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:12vh auto;padding:0 1.5rem;color:#111}
  h1{font-size:1.3rem;margin:0 0 1rem}
@@ -71,8 +102,15 @@ function page(title: string, body: string, status = 200): Response {
  button{font:inherit;background:#111;color:#fff;border:0;border-radius:6px;padding:.6rem 1.2rem;cursor:pointer}
  .muted{color:#666;font-size:.9rem}
 </style>
-<h1>${title}</h1>${body}`,
-    { status, headers: { "content-type": "text/html; charset=utf-8" } },
+<h1>${safeTitle}</h1>${body}`,
+    {
+      status,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        // The denial page echoes a GitHub login; none of these should be cached.
+        "cache-control": "no-store",
+      },
+    },
   );
 }
 
@@ -82,7 +120,8 @@ function escapeHtml(s: string): string {
   );
 }
 
-function allowlist(env: Env): string[] {
+/** Shared with the API handler, which re-checks it on every request. */
+export function allowlist(env: Env): string[] {
   return (env.ALLOWED_GITHUB_LOGINS ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
@@ -99,6 +138,16 @@ export const authHandler = {
       try {
         oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
       } catch (error) {
+        // CIMD is the primary client path here, and its document is fetched live
+        // on every request. A slow or broken document is the client's problem,
+        // not a server fault, so it must not surface as a 500.
+        if (error instanceof CimdFetchError) {
+          return page(
+            "Client metadata unavailable",
+            "<p>This client's metadata document could not be fetched. Try again shortly.</p>",
+            502,
+          );
+        }
         if (!(error instanceof AuthorizationError)) throw error;
         if (!error.redirectUri) {
           return page("Authorization error", `<p>${escapeHtml(error.description)}</p>`, 400);
@@ -114,12 +163,17 @@ export const authHandler = {
       const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
       if (!client) return page("Unknown client", "<p>This OAuth client is not recognised.</p>", 400);
 
-      const state = await sign(
-        b64url(encoder.encode(JSON.stringify(oauthRequest))),
-        env.AUTH_STATE_SECRET,
-      );
-
       if (request.method === "POST") {
+        if (!isSameOrigin(request, url)) {
+          return page("Bad request", "<p>This request did not come from the consent page.</p>", 400);
+        }
+
+        const envelope: StateEnvelope = { r: oauthRequest, iat: Date.now() };
+        const state = await sign(
+          b64url(encoder.encode(JSON.stringify(envelope))),
+          env.AUTH_STATE_SECRET,
+        );
+
         const gh = new URL(GITHUB_AUTHORIZE);
         gh.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
         gh.searchParams.set("redirect_uri", new URL("/callback", request.url).toString());
@@ -146,7 +200,21 @@ export const authHandler = {
       const payload = await verify(state, env.AUTH_STATE_SECRET);
       if (!payload) return page("Bad request", "<p>State signature is invalid.</p>", 400);
 
-      const oauthRequest = JSON.parse(new TextDecoder().decode(unb64url(payload))) as AuthRequest;
+      // The signature proves we produced this payload, but a secret rotation can
+      // leave stale-yet-well-formed states in flight, so parse defensively.
+      let envelope: StateEnvelope;
+      try {
+        envelope = JSON.parse(new TextDecoder().decode(unb64url(payload))) as StateEnvelope;
+      } catch {
+        return page("Bad request", "<p>State payload is unreadable.</p>", 400);
+      }
+      if (!envelope?.r || typeof envelope.iat !== "number") {
+        return page("Bad request", "<p>State payload is malformed.</p>", 400);
+      }
+      if (Date.now() - envelope.iat > STATE_TTL_MS) {
+        return page("Sign-in expired", "<p>This sign-in link has expired. Start again.</p>", 400);
+      }
+      const oauthRequest = envelope.r;
 
       const tokenRes = await fetch(GITHUB_TOKEN, {
         method: "POST",

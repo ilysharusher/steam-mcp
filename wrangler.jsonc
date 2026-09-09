@@ -9,7 +9,10 @@
   "observability": { "enabled": true },
   "vars": {
     // Comma-separated GitHub logins allowed to sign in. Empty = ANYONE can sign in.
-    "ALLOWED_GITHUB_LOGINS": "ilysharusher"
+    "ALLOWED_GITHUB_LOGINS": "ilysharusher",
+    // This deployment's own /mcp URL. Pins the audience of issued tokens, so a
+    // token minted elsewhere cannot be replayed here. .dev.vars overrides it locally.
+    "MCP_RESOURCE_URL": "https://steam-mcp.ilysharusher.workers.dev/mcp"
   },
   "kv_namespaces": [
     {

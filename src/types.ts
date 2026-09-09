@@ -12,8 +12,10 @@ export interface Env {
   OAUTH_KV: KVNamespace;
   OAUTH_PROVIDER: OAuthHelpers;
 
-  // Vars (wrangler.jsonc)
+  // Vars (wrangler.jsonc; .dev.vars overrides locally)
   ALLOWED_GITHUB_LOGINS: string;
+  /** This deployment's own /mcp URL. Pins the audience of issued tokens. */
+  MCP_RESOURCE_URL?: string;
 
   // Secrets (wrangler secret put)
   GITHUB_CLIENT_ID: string;
