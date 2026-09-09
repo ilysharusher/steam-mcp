@@ -25,9 +25,11 @@ jobs:
           ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Pull this version's section out of CHANGELOG.md
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
+          tag="$TAG"
           awk -v v="${tag#v}" '
             $0 ~ "^## \\[" v "\\]" { grab = 1; next }
             grab && /^## \[/        { exit }
@@ -43,9 +45,10 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
+          tag="$TAG"
           # Idempotent: rerunning the workflow refreshes the notes instead of failing.
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --notes-file notes.md

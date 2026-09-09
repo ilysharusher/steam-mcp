@@ -3,6 +3,74 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.3.0] — 2026-09-10
+
+Findings from a full code review. Breaking: access tokens are now audience-bound, so
+existing clients must sign in again, and three tools changed their response shape.
+
+### Security
+- **The consent page was CSRF-able.** `POST /authorize` had no origin check, and
+  `parseAuthRequest` reads only the query string, so a cross-site auto-submitting form was
+  indistinguishable from a real submission. An attacker could host a CIMD document (no
+  registration needed — it is fetched live), bounce the victim through GitHub's silent
+  re-approval, and receive a working authorization code at their own `redirect_uri`; PKCE
+  did not help, because the attacker generated the challenge. The POST now requires
+  `Sec-Fetch-Site: same-origin`, falls back to an `Origin` match, and fails closed when
+  neither header is present.
+- **Access tokens are bound to this resource** via `resourceMetadata.resource`, configured
+  from the new `MCP_RESOURCE_URL` var so local development keeps working. Without it,
+  tokens carried no audience and nothing was validated. `scopes_supported` now appears in
+  the protected-resource metadata as well.
+- **The allowlist is enforced on every request,** not only at sign-in. Grants outlive a
+  config change, so removing a login from `ALLOWED_GITHUB_LOGINS` previously revoked nobody
+  until their token expired. Costs no extra subrequest.
+- **The signed `state` now expires** after 10 minutes and carries an issue time. The HMAC
+  always prevented forgery, but a captured state was replayable indefinitely.
+- Auth pages send `Cache-Control: no-store`, and `page()` escapes its own title.
+
+### Fixed
+- Two unauthenticated paths returned HTTP 500 in production, both reproduced and now
+  verified fixed: a malformed `state` signature (`atob` threw before the 400 branch could
+  run) and an unreachable CIMD document (`CimdFetchError` was rethrown into the void; now a
+  502 with an explanation).
+- **`friends` counted the wrong population.** It sliced to `limit` before filtering by
+  `online_only`, reporting the online share of an arbitrary first page rather than of the
+  list: 14 of the first 25 where 31 of 77 were actually online. It now asks Steam about
+  everyone it can in one call — `GetPlayerSummaries` takes 100 ids — filters, and slices
+  last. A non-public friends list answers 401, which now yields a specific note instead of
+  a message blaming the API key.
+- **`get_achievements` could not report "this game has no achievements".** Steam answers
+  400 with a populated body and `getJson` rejected every non-2xx, so the explanatory branch
+  was dead code and callers saw `Steam API returned 400`. `getJson` now accepts a list of
+  statuses that carry data rather than failure.
+- **`wishlist` silently dropped discounts** beyond the 50-entry enrichment cap while
+  reporting `count` as though it had checked everything, and its note described the
+  unfiltered case. It now scopes the filtered call explicitly and says what it checked.
+- **Unavailable wishlist entries were indistinguishable from un-enriched ones.** Steam
+  returns `appid: 0` with the real id in `id` when it cannot serve an item, so keying the
+  map on `appid` filed every failure under `0`. Now keyed on `id`, gated on `success`, and
+  flagged with `unavailable`.
+- `resolve()` no longer fails a store lookup when the library is private — only the tools
+  that genuinely need the library raise that error — and prefers the shortest substring
+  match over whichever candidate Steam happened to list first.
+- `profile_status` reports `unknown` rather than `offline` for a SteamID Steam did not
+  return, and `player_count` explains an unknown appid instead of failing on its 404.
+- Network failures are classified: a timeout and a non-JSON response now raise a
+  `SteamError` saying which, rather than escaping as `TimeoutError` or `SyntaxError`.
+- `hours()` no longer prints both `10.0h` and `10h` around the ten-hour boundary.
+
+### Added
+- `recently_played` returns `total_count`, `friends` returns `total_friends`, and news
+  excerpts have their HTML entities decoded.
+- `MCP_RESOURCE_URL` var, in `wrangler.jsonc` for production and `.dev.vars` locally.
+
+### Changed
+- `@modelcontextprotocol/server` is declared in `dependencies`. Two files imported it while
+  it resolved only transitively through `agents`, so a dedup or a caret bump could have
+  broken the build with no change on our side.
+- The release workflow passes the tag through `env` instead of interpolating it into the
+  shell.
+
 ## [0.2.0] — 2026-09-09
 
 Breaking: two tools are gone. Clients that called them need updating.

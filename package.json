@@ -1,6 +1,6 @@
 {
   "name": "steam-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Remote MCP server exposing Steam library, achievements and stats. Cloudflare Workers + OAuth 2.1 via GitHub.",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.10.3",
+    "@modelcontextprotocol/server": "^2.0.0",
     "agents": "^0.22.0",
     "zod": "^4.5.4"
   },

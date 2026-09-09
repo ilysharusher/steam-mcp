@@ -133,6 +133,7 @@ CPU time excludes waiting on `fetch()`, so slow Steam responses cost nothing.
   `wishlistdata` — that path returns HTML now.
 - Nothing in-game is available: no save files, no story progress. Steam only exposes what a game reports as achievements and stats.
 - Prices come back in UAH; change `CC` in `src/tools.ts` for another region.
+- Dates are UTC. An evening session east of UTC can read as the following day.
 
 ## Releases
 
@@ -155,7 +156,7 @@ live in three places: `package.json`, `CHANGELOG.md`, and the `McpServer` constr
 src/
 ├── index.ts   # OAuthProvider wiring, protected /mcp entrypoint
 ├── auth.ts    # GitHub OAuth: /authorize, consent, /callback, allowlist
-├── tools.ts   # The 14 MCP tools
+├── tools.ts   # The 12 MCP tools
 ├── steam.ts   # Steam Web API client, batching, formatting
 └── types.ts   # Env bindings and authenticated user props
 ```
