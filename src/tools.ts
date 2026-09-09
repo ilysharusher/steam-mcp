@@ -52,9 +52,14 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     return libraryMemo;
   };
 
-  /** Accepts an appid or a game name; prefers the owned library over the store. */
-  async function resolve(game: string): Promise<{ appid: number; name: string }> {
-    if (/^\d+$/.test(game)) return { appid: Number(game), name: `app ${game}` };
+  /**
+   * Accepts an appid or a game name; prefers the owned library over the store.
+   * A numeric input needs no lookup, so the name comes back null instead of a
+   * made-up `app 730` — callers that get a real name in their own payload should
+   * use that.
+   */
+  async function resolve(game: string): Promise<{ appid: number; name: string | null }> {
+    if (/^\d+$/.test(game)) return { appid: Number(game), name: null };
 
     const needle = game.toLowerCase();
     const games = await library();
@@ -75,15 +80,23 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     {
       title: "List library",
       description:
-        "Owned games with playtime, sorted by hours played. Use min_hours/limit to keep the output small.",
+        "Owned games with playtime, sorted by hours played. Use min_hours/max_hours/limit to keep the output small; max_hours: 0 gives the backlog.",
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).default(25),
         min_hours: z.number().min(0).default(0),
+        max_hours: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Upper bound on hours played; 0 returns the untouched backlog"),
         sort: z.enum(["playtime", "recent", "name"]).default("playtime"),
       }),
     },
-    async ({ limit, min_hours, sort }) => {
-      const games = (await library()).filter((g) => g.playtime_forever / 60 >= min_hours);
+    async ({ limit, min_hours, max_hours, sort }) => {
+      const games = (await library()).filter((g) => {
+        const h = g.playtime_forever / 60;
+        return h >= min_hours && (max_hours === undefined || h <= max_hours);
+      });
       const sorted = [...games].sort((a, b) => {
         if (sort === "name") return (a.name ?? "").localeCompare(b.name ?? "");
         if (sort === "recent") return (b.rtime_last_played ?? 0) - (a.rtime_last_played ?? 0);
@@ -112,23 +125,27 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     },
     async () => {
       const games = await library();
-      const totalMinutes = games.reduce((s, g) => s + g.playtime_forever, 0);
-      const played = games.filter((g) => g.playtime_forever > 0);
+
+      // One descending sort feeds both the top list and the median: played games
+      // occupy the front of it, so the median is an index into that prefix.
+      const ranked = [...games].sort((a, b) => b.playtime_forever - a.playtime_forever);
+
+      let totalMinutes = 0;
+      let played = 0;
+      for (const g of games) {
+        totalMinutes += g.playtime_forever;
+        if (g.playtime_forever > 0) played++;
+      }
 
       return json({
         total_games: games.length,
-        played_games: played.length,
-        never_played: games.length - played.length,
+        played_games: played,
+        never_played: games.length - played,
         total_playtime: hours(totalMinutes),
         median_playtime_of_played: hours(
-          played.length
-            ? [...played].sort((a, b) => a.playtime_forever - b.playtime_forever)[
-                Math.floor(played.length / 2)
-              ].playtime_forever
-            : 0,
+          played ? ranked[played - 1 - Math.floor(played / 2)].playtime_forever : 0,
         ),
-        top_games: [...games]
-          .sort((a, b) => b.playtime_forever - a.playtime_forever)
+        top_games: ranked
           .slice(0, 10)
           .map((g) => ({ name: g.name, playtime: hours(g.playtime_forever) })),
       });
@@ -160,38 +177,11 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
   );
 
   server.registerTool(
-    "unplayed_games",
-    {
-      title: "Unplayed games",
-      description: "Owned games with little or no playtime — the backlog.",
-      inputSchema: z.object({
-        limit: z.number().int().min(1).max(100).default(30),
-        max_minutes: z.number().int().min(0).max(600).default(0),
-      }),
-    },
-    async ({ limit, max_minutes }) => {
-      const games = (await library())
-        .filter((g) => g.playtime_forever <= max_minutes)
-        .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-      return json({
-        count: games.length,
-        games: games.slice(0, limit).map((g) => ({
-          appid: g.appid,
-          name: g.name,
-          playtime: hours(g.playtime_forever),
-        })),
-      });
-    },
-  );
-
-  // --- lookup --------------------------------------------------------------
-
-  server.registerTool(
     "find_game",
     {
       title: "Find game",
       description:
-        "Resolve a name to an appid. Searches the owned library first, then the Steam store.",
+        "Search for a game by name and get its appid. Looks through the owned library first, then the Steam store.",
       inputSchema: z.object({ query: z.string().min(1) }),
     },
     async ({ query }) => {
@@ -262,7 +252,7 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
 
       const [player, global] = await Promise.all([
         api<{
-          playerstats: { achievements?: PlayerAchievement[]; error?: string };
+          playerstats: { achievements?: PlayerAchievement[]; error?: string; gameName?: string };
         }>(cfg, "ISteamUserStats/GetPlayerAchievements/v1/", {
           steamid: cfg.steamId,
           appid,
@@ -275,10 +265,12 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
         }).catch(() => null),
       ]);
 
+      // Steam names the game in its own payload, so an appid input still gets a title.
+      const title = player.playerstats.gameName ?? name;
       const list = player.playerstats.achievements;
       if (!list?.length) {
         return json({
-          game: name,
+          game: title,
           appid,
           note: player.playerstats.error ?? "This game has no achievements, or stats are private.",
         });
@@ -294,7 +286,7 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
           : list.filter((a) => (filter === "unlocked" ? a.achieved === 1 : a.achieved === 0));
 
       return json({
-        game: name,
+        game: title,
         appid,
         unlocked,
         total: list.length,
@@ -355,38 +347,6 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
       return json({ examined: games.length, games: rows.filter(Boolean) });
     },
   );
-
-  server.registerTool(
-    "perfect_games",
-    {
-      title: "Perfect games",
-      description: "Games completed to 100% achievements, per Steam's own counter.",
-      inputSchema: z.object({}),
-    },
-    async () => {
-      const d = await api<{
-        response: { games?: Array<{ appid: number; name?: string }> };
-      }>(cfg, "IPlayerService/GetOwnedGames/v1/", {
-        steamid: cfg.steamId,
-        include_appinfo: true,
-      });
-      const owned = new Map((d.response.games ?? []).map((g) => [g.appid, g.name]));
-
-      const badges = await api<{
-        response: { badges?: Array<{ badgeid: number; appid?: number; level?: number }> };
-      }>(cfg, "IPlayerService/GetBadges/v1/", { steamid: cfg.steamId }).catch(() => null);
-
-      return json({
-        note: "Steam exposes perfect-game data indirectly; use achievement_progress for exact percentages.",
-        candidates: (badges?.response.badges ?? [])
-          .filter((b) => b.appid && owned.has(b.appid))
-          .slice(0, 25)
-          .map((b) => ({ appid: b.appid, name: owned.get(b.appid!) })),
-      });
-    },
-  );
-
-  // --- live / social -------------------------------------------------------
 
   server.registerTool(
     "get_news",

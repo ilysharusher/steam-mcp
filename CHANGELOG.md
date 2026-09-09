@@ -3,6 +3,32 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.2.0] — 2026-09-09
+
+Breaking: two tools are gone. Clients that called them need updating.
+
+### Removed
+- `perfect_games`. It listed 100% candidates by reading Steam badges, which are awarded for
+  trading cards and say nothing about achievements — of the four titles it returned on this
+  account, three sat at 29%, 39% and 31%. Steam has no endpoint for perfect games, and
+  computing it honestly costs one request per owned game (160 here, against a 50-request
+  budget). `achievement_progress` answers the same question correctly.
+- `unplayed_games`. It was `list_library` with a playtime filter over the same
+  `GetOwnedGames` call, and it was the only tool bypassing the memoised `library()` helper.
+  Use `list_library` with `max_hours: 0`.
+
+### Added
+- `list_library` accepts `max_hours`, mirroring the existing `min_hours`.
+
+### Fixed
+- Tools taking a `game` no longer invent a title when given a numeric appid. `resolve()`
+  returns `null` rather than `app 730`, and the field is reported as null.
+  `get_achievements` reads the real title out of Steam's own payload, so it names the game
+  either way, at no extra request.
+- `library_stats` sorts the library once instead of twice and totals it in a single pass.
+  Output is unchanged — the new median was checked against the old logic on the live
+  160-game library and matches.
+
 ## [0.1.1] — 2026-09-09
 
 ### Fixed

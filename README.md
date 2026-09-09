@@ -8,22 +8,23 @@ Runs on Cloudflare Workers. Stateless Streamable HTTP, OAuth 2.1 with GitHub sig
 
 | Tool | What it returns |
 |---|---|
-| `list_library` | Owned games with playtime; sort by playtime / recency / name |
+| `list_library` | Owned games with playtime; sort by playtime / recency / name. `max_hours: 0` gives the backlog |
 | `library_stats` | Game count, total and median hours, backlog size, top 10 |
 | `recently_played` | Last two weeks of activity |
-| `unplayed_games` | The backlog |
 | `find_game` | Name → appid, library first, then the store |
 | `game_details` | Description, release date, developer, genres, Metacritic, price |
 | `get_achievements` | Per-game progress plus global rarity for each achievement |
 | `achievement_progress` | Completion across the most-played games (max 15 per call) |
-| `perfect_games` | 100% completion candidates |
 | `get_news` | News and patch notes |
 | `player_count` | Concurrent players right now |
 | `profile_status` | Online state, current game, Steam level, ban flags |
 | `friends` | Friends with online status and current game |
 | `wishlist` | Wishlist with prices and discounts |
 
-Any tool taking a `game` accepts either an appid or a name — `"mw4"` resolves through the library.
+Any tool taking a `game` accepts either an appid or a name — `"mw4"` resolves through the
+library. Passing an appid skips the lookup, so the reply may carry `"game": null` where a
+name was not available; `get_achievements` still names the game, because Steam includes the
+title in its own response.
 
 ## Setup
 
