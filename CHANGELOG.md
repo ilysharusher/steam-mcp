@@ -23,7 +23,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [S
 - `wishlist` output gained `priority`, `added`, `was` (pre-discount price) and
   `total_on_wishlist`. Prices are now Steam's formatted strings, matching `game_details`.
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-09-08
 
 ### Added
 - Remote MCP server on Cloudflare Workers, stateless Streamable HTTP via `createMcpHandler`.

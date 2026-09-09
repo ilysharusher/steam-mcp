@@ -1,0 +1,54 @@
+name: Release
+
+# Publishes a GitHub Release whose body is the matching section of CHANGELOG.md.
+# CHANGELOG.md stays the source of truth — this only mirrors it onto the tag.
+
+on:
+  push:
+    tags: ["v*"]
+  # Lets an already-pushed tag (v0.1.0, say) get a release after the fact.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - name: Pull this version's section out of CHANGELOG.md
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          awk -v v="${tag#v}" '
+            $0 ~ "^## \\[" v "\\]" { grab = 1; next }
+            grab && /^## \[/        { exit }
+            grab                    { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > notes.md
+
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for ${tag#v}" >&2
+            exit 1
+          fi
+          cat notes.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          # Idempotent: rerunning the workflow refreshes the notes instead of failing.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --notes-file notes.md
+          else
+            gh release create "$tag" --title "$tag" --notes-file notes.md --verify-tag
+          fi
