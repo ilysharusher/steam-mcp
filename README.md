@@ -92,6 +92,7 @@ npm run deploy
 ```
 
 The endpoint is `https://steam-mcp.<subdomain>.workers.dev/mcp`.
+This deployment lives at <https://steam-mcp.ilysharusher.workers.dev/mcp>.
 
 ### 8. Connect a client
 
@@ -115,7 +116,7 @@ Clients without remote-MCP support:
 | Limit | Free plan | How it's handled |
 |---|---|---|
 | CPU per request | 10 ms | Compact JSON only, no pretty-printing, no per-item loops over the full library |
-| External subrequests | 50 | `achievement_progress` caps fan-out at 15 games |
+| External subrequests | 50 | `achievement_progress` caps fan-out at 15 games; `wishlist` costs 2 regardless of size |
 | Simultaneous connections | 6 | Fan-out runs in batches of 5 |
 | Bundle size | 64 MiB uncompressed | Currently ~3.3 MiB |
 
@@ -123,9 +124,29 @@ CPU time excludes waiting on `fetch()`, so slow Steam responses cost nothing.
 
 ## Notes
 
-- `game_details`, `find_game` (store path) and `wishlist` use undocumented storefront endpoints. Valve can change them without notice.
+- `game_details` and `find_game` (store path) use undocumented storefront endpoints on
+  `store.steampowered.com`. Valve can change them without notice.
+- `wishlist` used to go through one of those and broke when Valve retired it in 2026.
+  It now reads `IWishlistService/GetWishlist`, then resolves names and prices with a
+  single batched `IStoreBrowseService/GetItems` call. Do not point it back at
+  `wishlistdata` — that path returns HTML now.
 - Nothing in-game is available: no save files, no story progress. Steam only exposes what a game reports as achievements and stats.
 - Prices come back in UAH; change `CC` in `src/tools.ts` for another region.
+
+## Releases
+
+`CHANGELOG.md` is written by hand and is the source of truth. Pushing a `v*` tag runs
+`.github/workflows/release.yml`, which lifts that version's section out of the changelog
+and publishes it as a GitHub Release.
+
+```bash
+git tag v0.1.2 && git push origin v0.1.2
+```
+
+The tag must point at a commit whose `CHANGELOG.md` already has the matching `## [x.y.z]`
+heading, otherwise the job fails instead of publishing an empty release. Version numbers
+live in three places: `package.json`, `CHANGELOG.md`, and the `McpServer` constructor in
+`src/index.ts`.
 
 ## Development
 
