@@ -11,6 +11,9 @@ const API = "https://api.steampowered.com";
 const STORE = "https://store.steampowered.com";
 const TIMEOUT_MS = 10_000;
 
+/** GetPlayerSummaries accepts this many comma-separated ids in one call. */
+export const SUMMARY_BATCH = 100;
+
 /** Max games we will fan out over in one tool call. Keeps us far under 50. */
 export const MAX_FANOUT = 15;
 /** Parallel batch size. Workers allow 6 simultaneous outgoing connections. */
@@ -21,33 +24,76 @@ export interface SteamConfig {
   steamId: string;
 }
 
-export class SteamError extends Error {}
+export class SteamError extends Error {
+  /** HTTP status behind this failure, when there was one. */
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
 
 type Params = Record<string, string | number | boolean | undefined>;
 
-async function getJson<T>(url: URL): Promise<T> {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-    headers: { "User-Agent": "steam-mcp/1.0" },
-  });
-
-  if (res.status === 401 || res.status === 403) {
+/**
+ * Steam signals "there is no data for this" with a non-2xx status and a
+ * populated body, not with 200 and an empty one — `GetPlayerAchievements`
+ * answers 400 with `{"error":"Requested app has no stats"}`. `dataStatuses`
+ * lets a caller declare which of those are answers rather than failures, so the
+ * explanatory branches downstream can actually run.
+ */
+async function getJson<T>(url: URL, dataStatuses: number[] = []): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      headers: { "User-Agent": "steam-mcp/1.0" },
+    });
+  } catch (error) {
+    // AbortSignal.timeout throws a bare TimeoutError; don't leak it unwrapped.
     throw new SteamError(
-      "Steam rejected the request (401/403). Check STEAM_API_KEY and that the profile is public.",
+      (error as Error | undefined)?.name === "TimeoutError"
+        ? `Steam did not respond within ${TIMEOUT_MS / 1000}s.`
+        : "Could not reach Steam.",
     );
   }
-  if (!res.ok) throw new SteamError(`Steam API returned ${res.status}`);
-  return (await res.json()) as T;
+
+  if (!res.ok && !dataStatuses.includes(res.status)) {
+    if (res.status === 401 || res.status === 403) {
+      throw new SteamError(
+        "Steam refused the request (401/403). Either STEAM_API_KEY is wrong, or the data is " +
+          "private — check the profile, its 'Game details' setting, and its friends-list privacy.",
+        res.status,
+      );
+    }
+    throw new SteamError(`Steam API returned ${res.status}`, res.status);
+  }
+
+  try {
+    return (await res.json()) as T;
+  } catch {
+    // A storefront endpoint answering 200 with HTML is how the retired
+    // wishlistdata path failed. Say so instead of throwing a bare SyntaxError.
+    throw new SteamError(
+      `Steam returned a non-JSON response (${res.headers.get("content-type") ?? "unknown type"}).`,
+    );
+  }
 }
 
-export function api<T>(cfg: SteamConfig, path: string, params: Params = {}): Promise<T> {
+export function api<T>(
+  cfg: SteamConfig,
+  path: string,
+  params: Params = {},
+  dataStatuses: number[] = [],
+): Promise<T> {
   const url = new URL(`${API}/${path}`);
   url.searchParams.set("key", cfg.apiKey);
   url.searchParams.set("format", "json");
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
   }
-  return getJson<T>(url);
+  return getJson<T>(url, dataStatuses);
 }
 
 /** Undocumented storefront endpoints. Valve may change these without notice. */
@@ -148,7 +194,13 @@ export interface WishlistEntry {
 
 /** The subset of IStoreBrowseService/GetItems this server reads. */
 export interface StoreItem {
+  /** 0 when Steam could not serve this item — read `id` for the real appid. */
   appid: number;
+  /** Always the requested appid, including on failure. Key maps on this. */
+  id?: number;
+  /** 1 on success; anything else means the item is unavailable here. */
+  success?: number;
+  visible?: boolean;
   name?: string;
   is_free?: boolean;
   release?: { steam_release_date?: number; is_coming_soon?: boolean };
@@ -173,9 +225,13 @@ export interface PlayerAchievement {
 export function hours(minutes: number): string {
   if (!minutes) return "0h";
   const h = minutes / 60;
-  return h < 10 ? `${h.toFixed(1)}h` : `${Math.round(h)}h`;
+  // Decide on the rounded value, or 599 minutes prints "10.0h" while 600
+  // prints "10h" — same number, two formats.
+  const oneDecimal = Number(h.toFixed(1));
+  return oneDecimal < 10 ? `${oneDecimal.toFixed(1)}h` : `${Math.round(h)}h`;
 }
 
+/** UTC, deliberately: an evening session east of UTC may read as the next day. */
 export function day(unix?: number): string | null {
   return unix ? new Date(unix * 1000).toISOString().slice(0, 10) : null;
 }

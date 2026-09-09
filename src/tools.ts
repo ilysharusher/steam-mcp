@@ -12,6 +12,7 @@ import {
   type PlayerAchievement,
   type SteamConfig,
   SteamError,
+  SUMMARY_BATCH,
   storeDetails,
   type StoreItem,
   storeItems,
@@ -19,6 +20,28 @@ import {
   wishlist,
   type WishlistEntry,
 } from "./steam";
+
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+/** Steam news arrives as markup; strip tags and decode the entities behind them. */
+function stripMarkup(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(#\d+|[a-zA-Z]+);/g, (whole, entity: string) =>
+      entity.startsWith("#")
+        ? String.fromCharCode(Number(entity.slice(1)))
+        : (ENTITIES[entity.toLowerCase()] ?? whole),
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /** Storefront country code — affects prices only. */
 const CC = "ua";
@@ -62,10 +85,16 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     if (/^\d+$/.test(game)) return { appid: Number(game), name: null };
 
     const needle = game.toLowerCase();
-    const games = await library();
-    const hit =
-      games.find((g) => g.name?.toLowerCase() === needle) ??
-      games.find((g) => g.name?.toLowerCase().includes(needle));
+    // A private or empty library must not block a store lookup. Tools that
+    // genuinely need the library still raise the descriptive error themselves.
+    const games = await library().catch(() => [] as OwnedGame[]);
+    const exact = games.find((g) => g.name?.toLowerCase() === needle);
+    // Shortest substring wins: "half-life" has three candidates in this library,
+    // and picking whichever Steam listed first is arbitrary.
+    const partial = games
+      .filter((g) => g.name?.toLowerCase().includes(needle))
+      .sort((a, b) => (a.name?.length ?? 0) - (b.name?.length ?? 0))[0];
+    const hit = exact ?? partial;
     if (hit?.name) return { appid: hit.appid, name: hit.name };
 
     const first = (await storeSearch(game, CC)).items?.[0];
@@ -97,7 +126,9 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
         const h = g.playtime_forever / 60;
         return h >= min_hours && (max_hours === undefined || h <= max_hours);
       });
-      const sorted = [...games].sort((a, b) => {
+      // `games` is already a fresh array from filter(), so sort it in place —
+      // unlike library_stats, which must copy to protect the memoised library.
+      const sorted = games.sort((a, b) => {
         if (sort === "name") return (a.name ?? "").localeCompare(b.name ?? "");
         if (sort === "recent") return (b.rtime_last_played ?? 0) - (a.rtime_last_played ?? 0);
         return b.playtime_forever - a.playtime_forever;
@@ -143,6 +174,7 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
         never_played: games.length - played,
         total_playtime: hours(totalMinutes),
         median_playtime_of_played: hours(
+          // Upper median: index counts back from the played prefix's tail.
           played ? ranked[played - 1 - Math.floor(played / 2)].playtime_forever : 0,
         ),
         top_games: ranked
@@ -160,19 +192,22 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
       inputSchema: z.object({ limit: z.number().int().min(1).max(20).default(10) }),
     },
     async ({ limit }) => {
-      const d = await api<{ response: { games?: OwnedGame[] } }>(
+      const d = await api<{ response: { total_count?: number; games?: OwnedGame[] } }>(
         cfg,
         "IPlayerService/GetRecentlyPlayedGames/v1/",
         { steamid: cfg.steamId, count: limit },
       );
-      return json(
-        (d.response.games ?? []).map((g) => ({
+      // Steam already tells us how many it had; passing it on stops the caller
+      // from reading a truncated list as the whole fortnight.
+      return json({
+        total_count: d.response.total_count,
+        games: (d.response.games ?? []).map((g) => ({
           appid: g.appid,
           name: g.name,
           last_2_weeks: hours(g.playtime_2weeks ?? 0),
           total: hours(g.playtime_forever),
         })),
-      );
+      });
     },
   );
 
@@ -253,11 +288,14 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
       const [player, global] = await Promise.all([
         api<{
           playerstats: { achievements?: PlayerAchievement[]; error?: string; gameName?: string };
-        }>(cfg, "ISteamUserStats/GetPlayerAchievements/v1/", {
-          steamid: cfg.steamId,
-          appid,
-          l: "english",
-        }),
+        }>(
+          cfg,
+          "ISteamUserStats/GetPlayerAchievements/v1/",
+          { steamid: cfg.steamId, appid, l: "english" },
+          // Steam says "no stats for this app" with 400 plus a body, so that
+          // status is an answer here, not a transport failure.
+          [400],
+        ),
         api<{
           achievementpercentages: { achievements?: Array<{ name: string; percent: number }> };
         }>(cfg, "ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/", {
@@ -379,7 +417,7 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
           date: day(n.date),
           source: n.feedlabel,
           url: n.url,
-          excerpt: n.contents.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+          excerpt: stripMarkup(n.contents),
         })),
       });
     },
@@ -394,12 +432,17 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     },
     async ({ game }) => {
       const { appid, name } = await resolve(game);
-      const d = await api<{ response: { player_count?: number } }>(
+      // Steam answers 404 with a body for an unknown appid; that is an answer.
+      const d = await api<{ response: { player_count?: number; result?: number } }>(
         cfg,
         "ISteamUserStats/GetNumberOfCurrentPlayers/v1/",
         { appid },
+        [404],
       );
-      return json({ game: name, appid, players_online: d.response.player_count ?? null });
+      if (d.response.player_count === undefined) {
+        return json({ game: name, appid, players_online: null, note: "No such app on Steam." });
+      }
+      return json({ game: name, appid, players_online: d.response.player_count });
     },
   );
 
@@ -435,8 +478,10 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
       const states = ["offline", "online", "busy", "away", "snooze", "looking to trade", "looking to play"];
 
       return json({
-        name: p?.personaname,
-        state: states[p?.personastate ?? 0] ?? "unknown",
+        name: p?.personaname ?? null,
+        // An unresolvable SteamID comes back as an empty players array. Saying
+        // "offline" there would be a confident wrong answer.
+        state: p ? (states[p.personastate] ?? "unknown") : "unknown",
         playing_now: p?.gameextrainfo ?? null,
         last_logoff: day(p?.lastlogoff),
         account_created: day(p?.timecreated),
@@ -461,12 +506,31 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     async ({ online_only, limit }) => {
       const list = await api<{
         friendslist?: { friends?: Array<{ steamid: string; friend_since: number }> };
-      }>(cfg, "ISteamUser/GetFriendList/v1/", { steamid: cfg.steamId, relationship: "friend" });
+      }>(cfg, "ISteamUser/GetFriendList/v1/", {
+        steamid: cfg.steamId,
+        relationship: "friend",
+      }).catch((error: unknown) => {
+        // A non-public friends list answers 401. The API key is not the problem,
+        // so don't repeat the generic key-or-privacy message here.
+        if (error instanceof SteamError && error.status === 401) return null;
+        throw error;
+      });
 
-      const ids = (list.friendslist?.friends ?? []).slice(0, limit).map((f) => f.steamid);
-      if (!ids.length) return json({ friends: [], note: "No friends returned — the list may be private." });
+      if (!list) {
+        return json({
+          count: 0,
+          friends: [],
+          note: "Steam would not serve this friends list — its privacy setting is not public.",
+        });
+      }
 
-      // One batched call: GetPlayerSummaries accepts up to 100 comma-separated ids.
+      const all = list.friendslist?.friends ?? [];
+      if (!all.length) return json({ count: 0, total_friends: 0, friends: [] });
+
+      // Ask about everyone Steam will answer for in one call, and slice only
+      // AFTER filtering: slicing first reports the online share of an arbitrary
+      // first page as though it were the online share of the whole list.
+      const ids = all.slice(0, SUMMARY_BATCH).map((f) => f.steamid);
       const summaries = await api<{
         response: {
           players: Array<{
@@ -486,7 +550,15 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
           playing: p.gameextrainfo ?? null,
         }));
 
-      return json({ count: players.length, friends: players });
+      return json({
+        count: players.length,
+        total_friends: all.length,
+        friends: players.slice(0, limit),
+        note:
+          all.length > SUMMARY_BATCH
+            ? `Checked the first ${SUMMARY_BATCH} of ${all.length} friends; Steam serves at most that many per call.`
+            : undefined,
+      });
     },
   );
 
@@ -512,7 +584,11 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
       const wanted = on_sale_only ? WISHLIST_ENRICH_CAP : Math.min(limit, WISHLIST_ENRICH_CAP);
       const details = await wishlistDetails(ordered.slice(0, wanted).map((e) => e.appid));
 
-      const rows = ordered.map((e) => {
+      // Only enriched entries carry a discount, so a filtered call can answer
+      // for the enriched slice and nothing beyond it. Say which, rather than
+      // letting the filter quietly drop the tail.
+      const scope = on_sale_only ? ordered.slice(0, wanted) : ordered;
+      const rows = scope.map((e) => {
         const d = details.get(e.appid);
         return {
           appid: e.appid,
@@ -521,6 +597,7 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
           price: d?.price,
           was: d?.was,
           discount_percent: d?.discount_percent,
+          unavailable: d?.unavailable,
           priority: e.priority || undefined,
           added: day(e.date_added),
         };
@@ -533,7 +610,9 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
         items: filtered.slice(0, limit),
         note:
           entries.length > wanted
-            ? `Prices resolved for the first ${wanted} entries by priority; the rest carry appid only.`
+            ? on_sale_only
+              ? `Checked the ${wanted} highest-priority entries of ${entries.length}; discounts further down the list are not included.`
+              : `Prices resolved for the first ${wanted} entries by priority; the rest carry appid only.`
             : undefined,
       });
     },
@@ -547,6 +626,8 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
   }
 
   interface WishlistDetail {
+    /** True when Steam refused to serve the item: delisted, or region-locked. */
+    unavailable?: boolean;
     name?: string;
     release?: string | null;
     price?: string;
@@ -567,7 +648,16 @@ export function registerTools(server: McpServer, cfg: SteamConfig) {
     try {
       const items = (await storeItems(appids, CC)).response.store_items ?? [];
       if (items.length) {
-        for (const it of items) out.set(it.appid, fromStoreItem(it));
+        for (const it of items) {
+          // A failed lookup comes back as appid 0 with the requested id intact,
+          // so keying on appid would file it under 0 and leave the real entry
+          // looking merely un-enriched. Key on id and mark the difference.
+          const appid = it.id ?? it.appid;
+          out.set(
+            appid,
+            it.success === 1 && it.name ? fromStoreItem(it) : { unavailable: true },
+          );
+        }
         return out;
       }
     } catch {
