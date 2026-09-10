@@ -46,7 +46,12 @@ export function fakeEnv(over: Partial<Env> = {}): Env {
     OAUTH_KV: {} as KVNamespace,
     OAUTH_PROVIDER: {
       parseAuthRequest: async () => AUTH_REQUEST,
-      lookupClient: async () => ({ clientId: "test-client", clientName: "Test Client" }),
+      lookupClient: async () => ({
+        clientId: "test-client",
+        clientName: "Test Client",
+        redirectUris: ["https://client.example/callback"],
+        tokenEndpointAuthMethod: "none",
+      }),
       completeAuthorization: async () => ({
         redirectTo: "https://client.example/callback?code=abc",
       }),
