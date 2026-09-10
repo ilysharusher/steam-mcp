@@ -18,64 +18,14 @@ import {
   CimdFetchError,
 } from "@cloudflare/workers-oauth-provider";
 import type { Env, Props } from "./types";
+import { allowlist } from "./auth/allowlist";
+import { decodeState, encodeState } from "./auth/state";
+
+export { allowlist } from "./auth/allowlist";
 
 const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
 const GITHUB_USER = "https://api.github.com/user";
-
-const encoder = new TextEncoder();
-
-/** How long a signed authorization request stays usable. Bounds replay. */
-const STATE_TTL_MS = 10 * 60_000;
-
-/** What travels through GitHub in `state`: the pending request plus its age. */
-interface StateEnvelope {
-  r: AuthRequest;
-  iat: number;
-}
-
-function b64url(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function unb64url(text: string): Uint8Array {
-  const padded = text.replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
-}
-
-async function hmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
-
-async function sign(payload: string, secret: string): Promise<string> {
-  const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(payload));
-  return `${payload}.${b64url(new Uint8Array(sig))}`;
-}
-
-async function verify(token: string, secret: string): Promise<string | null> {
-  const idx = token.lastIndexOf(".");
-  if (idx < 0) return null;
-  // atob throws on non-base64. This runs on unauthenticated input, so a bad
-  // signature has to read as "invalid", not as a 500.
-  let sig: Uint8Array;
-  try {
-    sig = unb64url(token.slice(idx + 1));
-  } catch {
-    return null;
-  }
-  const payload = token.slice(0, idx);
-  const ok = await crypto.subtle.verify("HMAC", await hmacKey(secret), sig, encoder.encode(payload));
-  return ok ? payload : null;
-}
 
 /**
  * The consent form is the only human gate in this flow. Without this check a
@@ -120,14 +70,6 @@ function escapeHtml(s: string): string {
   );
 }
 
-/** Shared with the API handler, which re-checks it on every request. */
-export function allowlist(env: Env): string[] {
-  return (env.ALLOWED_GITHUB_LOGINS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 export const authHandler = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -168,11 +110,7 @@ export const authHandler = {
           return page("Bad request", "<p>This request did not come from the consent page.</p>", 400);
         }
 
-        const envelope: StateEnvelope = { r: oauthRequest, iat: Date.now() };
-        const state = await sign(
-          b64url(encoder.encode(JSON.stringify(envelope))),
-          env.AUTH_STATE_SECRET,
-        );
+        const state = await encodeState(oauthRequest, env.AUTH_STATE_SECRET);
 
         const gh = new URL(GITHUB_AUTHORIZE);
         gh.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
@@ -197,22 +135,9 @@ export const authHandler = {
       const state = url.searchParams.get("state");
       if (!code || !state) return page("Bad request", "<p>Missing code or state.</p>", 400);
 
-      const payload = await verify(state, env.AUTH_STATE_SECRET);
-      if (!payload) return page("Bad request", "<p>State signature is invalid.</p>", 400);
-
-      // The signature proves we produced this payload, but a secret rotation can
-      // leave stale-yet-well-formed states in flight, so parse defensively.
-      let envelope: StateEnvelope;
-      try {
-        envelope = JSON.parse(new TextDecoder().decode(unb64url(payload))) as StateEnvelope;
-      } catch {
-        return page("Bad request", "<p>State payload is unreadable.</p>", 400);
-      }
-      if (!envelope?.r || typeof envelope.iat !== "number") {
-        return page("Bad request", "<p>State payload is malformed.</p>", 400);
-      }
-      if (Date.now() - envelope.iat > STATE_TTL_MS) {
-        return page("Sign-in expired", "<p>This sign-in link has expired. Start again.</p>", 400);
+      const envelope = await decodeState(state, env.AUTH_STATE_SECRET);
+      if (!envelope) {
+        return page("Bad request", "<p>This sign-in link is invalid or expired.</p>", 400);
       }
       const oauthRequest = envelope.r;
 
