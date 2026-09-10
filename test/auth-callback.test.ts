@@ -90,3 +90,29 @@ describe("GET /callback allowlist", () => {
     expect(res.headers.get("location")).toBe("https://client.example/callback?code=abc");
   });
 });
+
+/**
+ * encodeState and decodeState were otherwise each pinned only against the
+ * independent signer in test/helpers.ts, never against each other. A drift in
+ * the envelope shape would satisfy both halves separately and still break the
+ * live flow.
+ */
+describe("state survives a round trip through the server's own signer", () => {
+  it("accepts a state the consent POST just produced", async () => {
+    const env = fakeEnv();
+    const consent = await authHandler.fetch(
+      new Request("https://mcp.example/authorize?client_id=test-client", {
+        method: "POST",
+        headers: { "sec-fetch-site": "same-origin" },
+      }),
+      env,
+    );
+    const state = new URL(consent.headers.get("location") ?? "").searchParams.get("state");
+    expect(state).toBeTruthy();
+
+    stubGithub("ilysharusher");
+    const res = await authHandler.fetch(callback({ code: "x", state: state! }), env);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://client.example/callback?code=abc");
+  });
+});
