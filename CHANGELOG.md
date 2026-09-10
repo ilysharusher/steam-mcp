@@ -3,15 +3,30 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.4.1] — 2026-09-10
 
-Post-release follow-ups from a code review of 0.4.0. No behaviour change.
+Closes a security question that had been open since 0.3.0, plus follow-ups from a code
+review of 0.4.0.
+
+### Changed
+- **An empty or missing `ALLOWED_GITHUB_LOGINS` now denies everyone.** It used to admit
+  everyone. That made one dropped variable — a typo, an edit to `wrangler.jsonc`, a deploy
+  from an environment where vars did not load — silently open this Steam account to anyone
+  with a GitHub login, with no error and nothing in any log. Locking yourself out is
+  recoverable with one deploy and is obvious immediately; the other direction is neither.
+  If you run this server, make sure the variable is set before deploying 0.4.1.
+- `allowlist(env): string[]` became `isAllowed(env, login): boolean`. The rule now lives in
+  one predicate instead of being re-derived at both call sites, which is what kept them
+  able to drift apart.
 
 ### Added
 - Tests for the API-side allowlist re-check in `SteamMcp.fetch` — the half of the double
   check that can actually revoke a live grant, and the only security invariant the 0.4.0
   suite had missed — and a round trip proving `encodeState` and `decodeState` agree with
   each other rather than only with the test helper.
+
+- Six tests around the allowlist: empty string, missing variable, whitespace-only entries,
+  case-insensitivity, and denial on both the sign-in and API sides.
 
 ### Removed
 - `src/auth/index.ts`. Six lines whose only substantive job was renaming a default export.

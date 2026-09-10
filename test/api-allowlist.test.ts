@@ -1,7 +1,7 @@
 import { createExecutionContext } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { SteamMcp } from "../src/index";
-import type { Props } from "../src/types";
+import type { Env, Props } from "../src/types";
 import { fakeEnv } from "./helpers";
 
 /**
@@ -44,10 +44,24 @@ describe("SteamMcp re-checks the allowlist on every request", () => {
     expect(body).toContain("wishlist");
   });
 
-  // Documented in CLAUDE.md as deliberate and deliberately risky. Pinned so the
-  // day it changes, it changes on purpose.
-  it("allows anyone when the allowlist is empty", async () => {
+  // Fail-closed since 0.4.1. An empty variable is a misconfiguration, and the
+  // safe reading of a misconfigured allowlist is "nobody", not "everybody".
+  it("denies everyone when the allowlist is empty", async () => {
     const res = await entrypoint("nobody-in-particular", "").fetch(mcpRequest());
+    expect(res.status).toBe(403);
+  });
+
+  it("denies everyone when the variable is missing entirely", async () => {
+    const ctx = createExecutionContext() as ExecutionContext & { props: Props };
+    ctx.props = { login: "ilysharusher", name: "Ilya", githubId: 1 };
+    const env = fakeEnv();
+    delete (env as Partial<Env>).ALLOWED_GITHUB_LOGINS;
+    const res = await new SteamMcp(ctx, env).fetch(mcpRequest());
+    expect(res.status).toBe(403);
+  });
+
+  it("ignores whitespace and empty entries around real logins", async () => {
+    const res = await entrypoint("ilysharusher", " , ilysharusher ,, ").fetch(mcpRequest());
     expect(res.status).not.toBe(403);
   });
 });

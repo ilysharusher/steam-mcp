@@ -61,7 +61,7 @@ Create two apps at <https://github.com/settings/developers> — one for local de
 | local | `http://localhost:8788` | `http://localhost:8788/callback` |
 | prod | `https://steam-mcp.<subdomain>.workers.dev` | `https://steam-mcp.<subdomain>.workers.dev/callback` |
 
-Set `ALLOWED_GITHUB_LOGINS` in `wrangler.jsonc` to your GitHub login. Leaving it empty lets **anyone** with a GitHub account in — don't.
+Set `ALLOWED_GITHUB_LOGINS` in `wrangler.jsonc` to your GitHub login, comma-separated for more than one. Leaving it empty or unset denies **everyone** — the server refuses sign-in and answers 403 on `/mcp`. That is deliberate: a misconfigured allowlist should lock you out, not open your Steam account to the internet.
 
 ### 5. Secrets
 

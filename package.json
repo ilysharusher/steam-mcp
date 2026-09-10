@@ -1,6 +1,6 @@
 {
   "name": "steam-mcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Remote MCP server exposing Steam library, achievements and stats. Cloudflare Workers + OAuth 2.1 via GitHub.",
   "private": true,
   "type": "module",

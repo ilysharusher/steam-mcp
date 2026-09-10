@@ -15,7 +15,7 @@ import { AuthorizationError, CimdFetchError } from "@cloudflare/workers-oauth-pr
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Env, Props } from "../types";
-import { allowlist } from "./allowlist";
+import { isAllowed } from "./allowlist";
 import { authorizeUrl, exchangeCode, fetchProfile } from "./github";
 import { decodeState, encodeState } from "./state";
 import { escapeHtml, page } from "./ui";
@@ -91,8 +91,7 @@ app.get("/callback", async (c) => {
   const user = await fetchProfile(token);
   if (!user) return page("Sign-in failed", "<p>Could not read the GitHub profile.</p>", 400);
 
-  const allowed = allowlist(c.env);
-  if (allowed.length && !allowed.includes(user.login.toLowerCase())) {
+  if (!isAllowed(c.env, user.login)) {
     return page(
       "Access denied",
       `<p>The GitHub account <code>${escapeHtml(user.login)}</code> is not on this server's allowlist.</p>`,

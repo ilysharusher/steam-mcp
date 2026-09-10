@@ -86,6 +86,16 @@ describe("GET /callback allowlist", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("denies sign-in entirely when the allowlist is empty", async () => {
+    stubGithub("anyone-at-all");
+    const state = await signState(AUTH_REQUEST, SECRET);
+    const res = await authHandler.fetch(
+      callback({ code: "x", state }),
+      fakeEnv({ ALLOWED_GITHUB_LOGINS: "" }),
+    );
+    expect(res.status).toBe(403);
+  });
+
   it("completes authorization for an allow-listed login", async () => {
     stubGithub("ilysharusher");
     const state = await signState(AUTH_REQUEST, SECRET);

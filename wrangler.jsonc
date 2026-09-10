@@ -8,7 +8,8 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
   "vars": {
-    // Comma-separated GitHub logins allowed to sign in. Empty = ANYONE can sign in.
+    // Comma-separated GitHub logins allowed to sign in. Empty or absent = NOBODY can
+    // sign in, and /mcp answers 403. Required for a working deployment.
     "ALLOWED_GITHUB_LOGINS": "ilysharusher",
     // This deployment's own /mcp URL. Pins the audience of issued tokens, so a
     // token minted elsewhere cannot be replayed here. .dev.vars overrides it locally.

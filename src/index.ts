@@ -9,7 +9,7 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/server";
-import { allowlist } from "./auth/allowlist";
+import { isAllowed } from "./auth/allowlist";
 import authApp from "./auth/app";
 import { registerTools } from "./tools";
 import type { Env, Props } from "./types";
@@ -20,14 +20,13 @@ export class SteamMcp extends WorkerEntrypoint<Env, Props> {
     // config change, so without this a login removed from ALLOWED_GITHUB_LOGINS
     // would keep working until its token expired. Costs no subrequest: props are
     // already decrypted by the provider.
-    const allowed = allowlist(this.env);
-    if (allowed.length && !allowed.includes(this.ctx.props.login.toLowerCase())) {
+    if (!isAllowed(this.env, this.ctx.props.login)) {
       return new Response("Forbidden", { status: 403 });
     }
 
     const handler = createMcpHandler(
       () => {
-        const server = new McpServer({ name: "steam-mcp", version: "0.4.0" });
+        const server = new McpServer({ name: "steam-mcp", version: "0.4.1" });
         registerTools(server, {
           apiKey: this.env.STEAM_API_KEY,
           steamId: this.env.STEAM_ID,
