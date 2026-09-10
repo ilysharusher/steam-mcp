@@ -3,7 +3,7 @@ import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
 const encoder = new TextEncoder();
 
 /** How long a signed authorization request stays usable. Bounds replay. */
-export const STATE_TTL_MS = 10 * 60_000;
+const STATE_TTL_MS = 10 * 60_000;
 
 /** What travels through GitHub in `state`: the pending request plus its age. */
 export interface StateEnvelope {
@@ -11,13 +11,13 @@ export interface StateEnvelope {
   iat: number;
 }
 
-export function b64url(bytes: Uint8Array): string {
+function b64url(bytes: Uint8Array): string {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export function unb64url(text: string): Uint8Array {
+function unb64url(text: string): Uint8Array {
   const padded = text.replace(/-/g, "+").replace(/_/g, "/");
   const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
   return Uint8Array.from(raw, (c) => c.charCodeAt(0));
@@ -33,12 +33,12 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
   );
 }
 
-export async function sign(payload: string, secret: string): Promise<string> {
+async function sign(payload: string, secret: string): Promise<string> {
   const sig = await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(payload));
   return `${payload}.${b64url(new Uint8Array(sig))}`;
 }
 
-export async function verify(token: string, secret: string): Promise<string | null> {
+async function verify(token: string, secret: string): Promise<string | null> {
   const idx = token.lastIndexOf(".");
   if (idx < 0) return null;
   // atob throws on non-base64. This runs on unauthenticated input, so a bad

@@ -35,7 +35,6 @@ export function registerStoreTools(server: McpServer, { cfg, resolve }: ToolCont
     },
   );
 
-  // --- achievements --------------------------------------------------------
 
   server.registerTool(
     "get_news",

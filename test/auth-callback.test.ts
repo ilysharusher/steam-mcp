@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { authHandler } from "../src/auth";
+import authHandler from "../src/auth/app";
 import { AUTH_REQUEST, fakeEnv, signState } from "./helpers";
 
 const SECRET = "test-secret-value";
@@ -47,6 +47,10 @@ describe("GET /callback state validation", () => {
     expect(res.status).toBe(400);
   });
 
+  // The signature here is genuine, so this is the only case in this block that
+  // reaches the TTL branch. The message assertion below does not prove that —
+  // decodeState answers "invalid or expired" for all four failure modes on
+  // purpose, since an unauthenticated caller learns nothing from the difference.
   it("400s on a correctly signed but expired state", async () => {
     const eleven = Date.now() - 11 * 60_000;
     const state = await signState(AUTH_REQUEST, SECRET, eleven);

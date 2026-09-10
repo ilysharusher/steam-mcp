@@ -9,7 +9,8 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createMcpHandler } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/server";
-import { allowlist, authHandler } from "./auth";
+import { allowlist } from "./auth/allowlist";
+import authApp from "./auth/app";
 import { registerTools } from "./tools";
 import type { Env, Props } from "./types";
 
@@ -50,7 +51,7 @@ function getProvider(env: Env): OAuthProvider<Env> {
   provider ??= new OAuthProvider<Env>({
     apiRoute: "/mcp",
     apiHandler: SteamMcp,
-    defaultHandler: authHandler,
+    defaultHandler: authApp,
 
     authorizeEndpoint: "/authorize",
     tokenEndpoint: "/oauth/token",

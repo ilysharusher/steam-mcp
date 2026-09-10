@@ -1,6 +1,6 @@
 import { AuthorizationError, CimdFetchError } from "@cloudflare/workers-oauth-provider";
 import { describe, expect, it } from "vitest";
-import { authHandler } from "../src/auth";
+import authHandler from "../src/auth/app";
 import { fakeEnv } from "./helpers";
 
 const AUTHORIZE = "https://mcp.example/authorize?client_id=test-client";

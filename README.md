@@ -164,7 +164,9 @@ src/
 │   ├── ui.ts       #   consent and error pages
 │   └── allowlist.ts
 ├── tools/          # The 12 MCP tools, by domain
+│   ├── index.ts    #   registerTools(): builds the context, calls the five below
 │   ├── context.ts  #   per-request library memo and name resolver
+│   ├── format.ts   #   CC (price region) and news markup stripping
 │   ├── library.ts  #   list_library, library_stats, recently_played, find_game
 │   ├── achievements.ts
 │   ├── store.ts    #   game_details, get_news, player_count
