@@ -3,6 +3,40 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.4.0] — 2026-09-10
+
+Internal restructuring. No tool, route, status code or payload changes.
+
+### Changed
+- The web layer routes with **Hono** instead of hand-rolled `url.pathname` checks. The
+  same-origin gate on the consent POST is now middleware, and the error mapping for
+  `CimdFetchError` and `AuthorizationError` moved into a single `onError` handler.
+  `src/auth.ts` became `src/auth/`: app, signed state, GitHub client, page rendering and
+  allowlist as separate modules. Hono was chosen because Cloudflare's own
+  `remote-mcp-github-oauth` demo puts a Hono app in exactly this slot — as the
+  `defaultHandler` of the same OAuth provider this server already uses.
+- `src/tools.ts` — 699 lines holding all 12 tools — split into `src/tools/` by domain:
+  library, achievements, store, wishlist and social. The tools shared a closure over
+  `libraryMemo`, `library()` and `resolve()`, so that state moved into an explicit
+  `ToolContext` built once per request. `WISHLIST_ENRICH_CAP` now sits beside its only
+  consumer instead of 500 lines above it.
+
+### Added
+- A vitest suite running in **workerd**, the same runtime as production. Thirty tests
+  covering the auth invariants — the consent gate failing closed when neither
+  `Sec-Fetch-Site` nor `Origin` is present, state signature and TTL handling answering 400
+  rather than 500 on unauthenticated garbage, allowlist denial, HTML escaping of both the
+  client name and a rejected login, `cache-control: no-store` — plus the per-request
+  scoping of the library memo and the registration of all twelve tools.
+
+### Notes
+- Bundle grew from 3267.17 KiB to 3330.22 KiB (613.62 → 628.83 KiB gzip): +15 KiB gzip for
+  Hono, 2.4%.
+- Tests run in the Workers runtime out of necessity, not preference:
+  `@cloudflare/workers-oauth-provider` imports `cloudflare:workers`, which no Node loader
+  resolves. vitest is pinned to `^4.1` because `@cloudflare/vitest-pool-workers@0.22`
+  peers it.
+
 ## [0.3.0] — 2026-09-10
 
 Findings from a full code review. Breaking: access tokens are now audience-bound, so

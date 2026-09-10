@@ -4,6 +4,8 @@ Remote MCP server exposing a Steam account — library, achievements, stats, new
 
 Runs on Cloudflare Workers. Stateless Streamable HTTP, OAuth 2.1 with GitHub sign-in and a login allowlist. No Durable Objects.
 
+TypeScript with Hono for the web layer; the MCP layer is the official SDK plus Cloudflare's Agents handler.
+
 ## Tools
 
 | Tool | What it returns |
@@ -119,7 +121,7 @@ Clients without remote-MCP support:
 | CPU per request | 10 ms | Compact JSON only, no pretty-printing, no per-item loops over the full library |
 | External subrequests | 50 | `achievement_progress` caps fan-out at 15 games; `wishlist` costs 2 regardless of size |
 | Simultaneous connections | 6 | Fan-out runs in batches of 5 |
-| Bundle size | 64 MiB uncompressed | Currently ~3.3 MiB |
+| Bundle size | 64 MiB uncompressed | Currently ~3.3 MiB (629 KiB gzip) |
 
 CPU time excludes waiting on `fetch()`, so slow Steam responses cost nothing.
 
@@ -132,7 +134,7 @@ CPU time excludes waiting on `fetch()`, so slow Steam responses cost nothing.
   single batched `IStoreBrowseService/GetItems` call. Do not point it back at
   `wishlistdata` — that path returns HTML now.
 - Nothing in-game is available: no save files, no story progress. Steam only exposes what a game reports as achievements and stats.
-- Prices come back in UAH; change `CC` in `src/tools.ts` for another region.
+- Prices come back in UAH; change `CC` in `src/tools/format.ts` for another region.
 - Dates are UTC. An evening session east of UTC can read as the following day.
 
 ## Releases
@@ -154,11 +156,41 @@ live in three places: `package.json`, `CHANGELOG.md`, and the `McpServer` constr
 
 ```
 src/
-├── index.ts   # OAuthProvider wiring, protected /mcp entrypoint
-├── auth.ts    # GitHub OAuth: /authorize, consent, /callback, allowlist
-├── tools.ts   # The 12 MCP tools
-├── steam.ts   # Steam Web API client, batching, formatting
-└── types.ts   # Env bindings and authenticated user props
+├── index.ts        # OAuthProvider wiring, protected /mcp entrypoint
+├── auth/           # GitHub OAuth — a Hono app
+│   ├── app.ts      #   routes: /authorize, consent POST, /callback, landing
+│   ├── state.ts    #   HMAC-signed state envelope, 10-minute TTL
+│   ├── github.ts   #   code exchange and profile read
+│   ├── ui.ts       #   consent and error pages
+│   └── allowlist.ts
+├── tools/          # The 12 MCP tools, by domain
+│   ├── context.ts  #   per-request library memo and name resolver
+│   ├── library.ts  #   list_library, library_stats, recently_played, find_game
+│   ├── achievements.ts
+│   ├── store.ts    #   game_details, get_news, player_count
+│   ├── wishlist.ts
+│   └── social.ts   #   profile_status, friends
+├── steam.ts        # Steam Web API client, batching, formatting
+└── types.ts        # Env bindings and authenticated user props
+test/               # vitest suite, runs in workerd
 ```
 
-Add a tool by registering it in `registerTools()`. Keep an eye on the subrequest budget: one upstream call per game adds up fast.
+Add a tool to the module for its domain and it registers automatically through
+`src/tools/index.ts`. Keep an eye on the subrequest budget: one upstream call per game adds
+up fast.
+
+`createContext()` must stay a per-request call, made inside the `createMcpHandler` factory.
+It holds the library memo, and a Workers isolate serves many requests — hoisting it to
+module scope would pin one library fetch and serve it forever as fresh data.
+
+### Tests
+
+```bash
+npm test          # vitest, in the Workers runtime
+npm run typecheck
+```
+
+Tests run in workerd rather than Node because `@cloudflare/workers-oauth-provider` imports
+`cloudflare:workers`, which no Node loader resolves. They also cover the security
+invariants — the consent gate must fail closed, malformed state must answer 400 and never
+500 — so a red test there is a real regression, not a fixture to update.

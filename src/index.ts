@@ -26,7 +26,7 @@ export class SteamMcp extends WorkerEntrypoint<Env, Props> {
 
     const handler = createMcpHandler(
       () => {
-        const server = new McpServer({ name: "steam-mcp", version: "0.3.0" });
+        const server = new McpServer({ name: "steam-mcp", version: "0.4.0" });
         registerTools(server, {
           apiKey: this.env.STEAM_API_KEY,
           steamId: this.env.STEAM_ID,
