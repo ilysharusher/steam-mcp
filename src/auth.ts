@@ -19,13 +19,11 @@ import {
 } from "@cloudflare/workers-oauth-provider";
 import type { Env, Props } from "./types";
 import { allowlist } from "./auth/allowlist";
+import { authorizeUrl, exchangeCode, fetchProfile } from "./auth/github";
 import { decodeState, encodeState } from "./auth/state";
+import { escapeHtml, page } from "./auth/ui";
 
 export { allowlist } from "./auth/allowlist";
-
-const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
-const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
-const GITHUB_USER = "https://api.github.com/user";
 
 /**
  * The consent form is the only human gate in this flow. Without this check a
@@ -38,36 +36,6 @@ function isSameOrigin(request: Request, url: URL): boolean {
   const site = request.headers.get("sec-fetch-site");
   if (site) return site === "same-origin";
   return request.headers.get("origin") === url.origin;
-}
-
-function page(title: string, body: string, status = 200): Response {
-  const safeTitle = escapeHtml(title);
-  return new Response(
-    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${safeTitle}</title>
-<style>
- body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:12vh auto;padding:0 1.5rem;color:#111}
- h1{font-size:1.3rem;margin:0 0 1rem}
- code{background:#f2f2f2;padding:.1rem .35rem;border-radius:3px;font-size:.9em}
- button{font:inherit;background:#111;color:#fff;border:0;border-radius:6px;padding:.6rem 1.2rem;cursor:pointer}
- .muted{color:#666;font-size:.9rem}
-</style>
-<h1>${safeTitle}</h1>${body}`,
-    {
-      status,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        // The denial page echoes a GitHub login; none of these should be cached.
-        "cache-control": "no-store",
-      },
-    },
-  );
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
-  );
 }
 
 export const authHandler = {
@@ -112,12 +80,8 @@ export const authHandler = {
 
         const state = await encodeState(oauthRequest, env.AUTH_STATE_SECRET);
 
-        const gh = new URL(GITHUB_AUTHORIZE);
-        gh.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
-        gh.searchParams.set("redirect_uri", new URL("/callback", request.url).toString());
-        gh.searchParams.set("scope", "read:user");
-        gh.searchParams.set("state", state);
-        return Response.redirect(gh.toString(), 302);
+        const callbackUrl = new URL("/callback", request.url).toString();
+        return Response.redirect(authorizeUrl(env, callbackUrl, state), 302);
       }
 
       const name = escapeHtml(client.clientName ?? oauthRequest.clientId);
@@ -141,31 +105,15 @@ export const authHandler = {
       }
       const oauthRequest = envelope.r;
 
-      const tokenRes = await fetch(GITHUB_TOKEN, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({
-          client_id: env.GITHUB_CLIENT_ID,
-          client_secret: env.GITHUB_CLIENT_SECRET,
-          code,
-          redirect_uri: new URL("/callback", request.url).toString(),
-        }),
-      });
-      const tokenJson = (await tokenRes.json()) as { access_token?: string };
-      if (!tokenJson.access_token) {
+      const callbackUrl = new URL("/callback", request.url).toString();
+      const token = await exchangeCode(env, code, callbackUrl);
+      if (!token) {
         return page("Sign-in failed", "<p>GitHub did not return an access token.</p>", 400);
       }
 
-      const userRes = await fetch(GITHUB_USER, {
-        headers: {
-          authorization: `Bearer ${tokenJson.access_token}`,
-          accept: "application/vnd.github+json",
-          "user-agent": "steam-mcp",
-        },
-      });
-      if (!userRes.ok) return page("Sign-in failed", "<p>Could not read the GitHub profile.</p>", 400);
+      const user = await fetchProfile(token);
+      if (!user) return page("Sign-in failed", "<p>Could not read the GitHub profile.</p>", 400);
 
-      const user = (await userRes.json()) as { login: string; name?: string; id: number };
       const allowed = allowlist(env);
       if (allowed.length && !allowed.includes(user.login.toLowerCase())) {
         return page(
