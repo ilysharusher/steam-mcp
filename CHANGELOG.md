@@ -3,6 +3,25 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Post-release follow-ups from a code review of 0.4.0. No behaviour change.
+
+### Added
+- Tests for the API-side allowlist re-check in `SteamMcp.fetch` — the half of the double
+  check that can actually revoke a live grant, and the only security invariant the 0.4.0
+  suite had missed — and a round trip proving `encodeState` and `decodeState` agree with
+  each other rather than only with the test helper.
+
+### Removed
+- `src/auth/index.ts`. Six lines whose only substantive job was renaming a default export.
+
+### Fixed
+- Residue from the split: a stale section header in `src/tools/store.ts`, one level of
+  leftover indentation in `src/tools/wishlist.ts`, five `export` keywords in
+  `src/auth/state.ts` on symbols nothing outside the module consumes, and a test file whose
+  name no longer matched its contents.
+
 ## [0.4.0] — 2026-09-10
 
 Internal restructuring. No tool, route, status code or payload changes.
