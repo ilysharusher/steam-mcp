@@ -13,6 +13,6 @@
     "esModuleInterop": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
   "exclude": ["node_modules"]
 }

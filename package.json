@@ -8,6 +8,8 @@
     "dev": "wrangler dev --port 8788",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "build:check": "wrangler deploy --dry-run --outdir=.bundle",
     "tail": "wrangler tail",
     "inspector": "npx @modelcontextprotocol/inspector@latest"
@@ -20,8 +22,10 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@cloudflare/workers-types": "^5.20260907.1",
     "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
     "wrangler": "^4.129.1"
   },
   "engines": {
