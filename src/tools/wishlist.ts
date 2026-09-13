@@ -34,21 +34,20 @@ export function registerWishlistTools(server: McpServer, { cfg }: ToolContext) {
       }),
     },
     async ({ on_sale_only, limit }) => {
-      const entries = (await wishlist(cfg)).response.items ?? [];
-      if (!entries.length) return json({ count: 0, items: [] });
+      const entries = (await wishlist(cfg)).response?.items ?? [];
+      if (!entries.length) return json({ count: 0, total_on_wishlist: 0, items: [] });
 
       const ordered = [...entries].sort(byPriority);
 
       // Filtering by discount needs prices for everything we might keep, so a
       // filtered call enriches up to the cap; an unfiltered one only enriches
-      // the page it is about to return.
+      // the page it is about to return. Slice before mapping: building rows for
+      // entries the limit is about to discard is pure CPU against a 10 ms
+      // budget, and on a 300-game wishlist it was most of them.
       const wanted = on_sale_only ? WISHLIST_ENRICH_CAP : Math.min(limit, WISHLIST_ENRICH_CAP);
-      const details = await wishlistDetails(ordered.slice(0, wanted).map((e) => e.appid));
+      const scope = ordered.slice(0, wanted);
+      const details = await wishlistDetails(scope.map((e) => e.appid));
 
-      // Only enriched entries carry a discount, so a filtered call can answer
-      // for the enriched slice and nothing beyond it. Say which, rather than
-      // letting the filter quietly drop the tail.
-      const scope = on_sale_only ? ordered.slice(0, wanted) : ordered;
       const rows = scope.map((e) => {
         const d = details.get(e.appid);
         return {
@@ -65,16 +64,35 @@ export function registerWishlistTools(server: McpServer, { cfg }: ToolContext) {
       });
 
       const filtered = on_sale_only ? rows.filter((r) => (r.discount_percent ?? 0) > 0) : rows;
+      const items = filtered.slice(0, limit);
+
+      // Only enriched entries carry a discount, so a filtered call can answer
+      // for the enriched slice and nothing beyond it. Say which, rather than
+      // letting the filter quietly drop the tail.
+      const notes: string[] = [];
+      if (on_sale_only && entries.length > wanted) {
+        notes.push(
+          `Checked the ${wanted} highest-priority entries of ${entries.length}; discounts further down the list are not included.`,
+        );
+      }
+      if (filtered.length > items.length) {
+        notes.push(`Showing ${items.length} of ${filtered.length} matches.`);
+      }
+      if (!on_sale_only && entries.length > items.length) {
+        notes.push(
+          `Showing the ${items.length} highest-priority entries of ${entries.length}.`,
+        );
+      }
+
       return json({
-        count: filtered.length,
+        // What this response contains. total_on_wishlist is the whole list, and
+        // matched is how many of the examined entries passed the filter — three
+        // different numbers that used to be conflated into two.
+        count: items.length,
         total_on_wishlist: entries.length,
-        items: filtered.slice(0, limit),
-        note:
-          entries.length > wanted
-            ? on_sale_only
-              ? `Checked the ${wanted} highest-priority entries of ${entries.length}; discounts further down the list are not included.`
-              : `Prices resolved for the first ${wanted} entries by priority; the rest carry appid only.`
-            : undefined,
+        ...(on_sale_only ? { matched: filtered.length, examined: scope.length } : {}),
+        items,
+        note: notes.length ? notes.join(" ") : undefined,
       });
     },
   );

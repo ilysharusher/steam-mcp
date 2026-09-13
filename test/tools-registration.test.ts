@@ -9,6 +9,7 @@ const EXPECTED = [
   "find_game",
   "friends",
   "game_details",
+  "game_stats",
   "get_achievements",
   "get_news",
   "library_stats",
@@ -27,7 +28,7 @@ function registeredNames(server: McpServer): string[] {
 }
 
 describe("registerTools", () => {
-  it("registers exactly the twelve documented tools", () => {
+  it("registers exactly the thirteen documented tools", () => {
     const server = new McpServer({ name: "steam-mcp", version: "test" });
     registerTools(server, CFG);
     expect(registeredNames(server)).toEqual(EXPECTED);

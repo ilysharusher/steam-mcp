@@ -25,7 +25,7 @@ export function createContext(cfg: SteamConfig): ToolContext {
       "IPlayerService/GetOwnedGames/v1/",
       { steamid: cfg.steamId, include_appinfo: true, include_played_free_games: true },
     ).then((d) => {
-      const games = d.response.games ?? [];
+      const games = d.response?.games ?? [];
       if (!games.length) {
         throw new SteamError(
           "Steam returned an empty library. This almost always means 'Game details' is not set to Public in the profile's privacy settings.",

@@ -4,6 +4,9 @@ import { api, day, hours, json, storeSearch, type OwnedGame } from "../steam";
 import type { ToolContext } from "./context";
 import { CC } from "./format";
 
+/** How many matches find_game returns. It is a lookup, not a listing. */
+const FIND_LIMIT = 10;
+
 export function registerLibraryTools(server: McpServer, { cfg, library }: ToolContext) {
   server.registerTool(
     "list_library",
@@ -35,9 +38,15 @@ export function registerLibraryTools(server: McpServer, { cfg, library }: ToolCo
         return b.playtime_forever - a.playtime_forever;
       });
 
+      const page = sorted.slice(0, limit);
       return json({
+        count: page.length,
         matched: sorted.length,
-        games: sorted.slice(0, limit).map((g) => ({
+        note:
+          sorted.length > page.length
+            ? `Showing ${page.length} of ${sorted.length} matching games.`
+            : undefined,
+        games: page.map((g) => ({
           appid: g.appid,
           name: g.name,
           playtime: hours(g.playtime_forever),
@@ -101,8 +110,8 @@ export function registerLibraryTools(server: McpServer, { cfg, library }: ToolCo
       // Steam already tells us how many it had; passing it on stops the caller
       // from reading a truncated list as the whole fortnight.
       return json({
-        total_count: d.response.total_count,
-        games: (d.response.games ?? []).map((g) => ({
+        total_count: d.response?.total_count,
+        games: (d.response?.games ?? []).map((g) => ({
           appid: g.appid,
           name: g.name,
           last_2_weeks: hours(g.playtime_2weeks ?? 0),
@@ -122,20 +131,50 @@ export function registerLibraryTools(server: McpServer, { cfg, library }: ToolCo
     },
     async ({ query }) => {
       const needle = query.toLowerCase();
-      const owned = (await library())
-        .filter((g) => g.name?.toLowerCase().includes(needle))
-        .slice(0, 10)
-        .map((g) => ({
+      // A bare array could never say it had been cut short, so this returns an
+      // object: count is what came back, matched is how many the query hit.
+      // A private library must not block a store lookup — resolve() in
+      // context.ts degrades the same way. This tool promises the library first
+      // and the store second, so failing the first step has to fall through.
+      const owned = (await library().catch(() => [] as OwnedGame[])).filter((g) =>
+        g.name?.toLowerCase().includes(needle),
+      );
+
+      if (owned.length) {
+        const games = owned.slice(0, FIND_LIMIT).map((g) => ({
           appid: g.appid,
           name: g.name,
           playtime: hours(g.playtime_forever),
           owned: true,
         }));
+        return json({
+          count: games.length,
+          matched: owned.length,
+          source: "library",
+          games,
+          note:
+            owned.length > games.length
+              ? `Showing ${games.length} of ${owned.length} owned games matching "${query}".`
+              : undefined,
+        });
+      }
 
-      if (owned.length) return json(owned);
-
+      // Steam's store search caps its own reply at ten items and reports
+      // total: 10 whatever the term, so there is no match count to report here
+      // — matched would always equal count. Say what is actually true instead.
       const store = (await storeSearch(query, CC)).items ?? [];
-      return json(store.slice(0, 10).map((i) => ({ appid: i.id, name: i.name, owned: false })));
+      const games = store
+        .slice(0, FIND_LIMIT)
+        .map((i) => ({ appid: i.id, name: i.name, owned: false }));
+      return json({
+        count: games.length,
+        source: "store",
+        games,
+        note:
+          games.length === FIND_LIMIT
+            ? `Steam's store search returns at most ${FIND_LIMIT} results; narrow the query to see others.`
+            : undefined,
+      });
     },
   );
 }

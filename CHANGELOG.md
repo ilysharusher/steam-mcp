@@ -3,6 +3,68 @@
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning is [SemVer](https://semver.org/).
 
+## [0.5.0] — 2026-09-13
+
+A new tool, honest counts across every tool, and a class of crash fixed in nine places.
+
+### Added
+- **`game_stats`** — lifetime counters Steam keeps per game: kills, wins, time played,
+  per-map and per-weapon totals. CS2 reports 184 of them. Distinct from achievements, which
+  are only unlocked or locked. `match` narrows by substring; without it a large set is
+  truncated and says so. Coverage is set by each developer, not by Steam: many games report
+  nothing, and a few report opaque names like `stat_25` that carry no meaning — the tool's
+  description says so rather than promising rich data everywhere.
+- **`game_details` now carries Steam's own review score** — `steam_review`,
+  `steam_review_percent`, `steam_reviews_total`. Metacritic is press-based and absent for
+  most games; CS2 has no Metacritic score at all but 9,855,656 Steam reviews at 86%
+  positive. Both are reported. Costs one extra subrequest and degrades to silence if the
+  undocumented endpoint fails.
+- **`get_achievements` now labels hidden achievements** — `hidden: true`, from
+  `GetSchemaForGame`. Steam withholds the description of a hidden achievement until it is
+  unlocked, and until now the tool simply omitted the field, leaving no way to tell "no
+  description exists" from "Valve is hiding it". The schema does not reveal the text either;
+  this labels rather than recovers. The Witcher 3 has 26 such achievements of 78.
+- **`achievement_progress` reports `failed`** separately from games that genuinely have no
+  achievements, and `total_with_stats` so `skip` can be paged.
+
+### Fixed
+- **`count` now means "how many came back" in every tool.** It did not, in five of them.
+  `wishlist` reported the size of the whole list — a 30-entry wishlist with `limit: 5`
+  answered `count: 30` while returning five items — and `friends`, `find_game`,
+  `get_achievements` and `achievement_progress` each conflated two of returned, matched and
+  total. `matched` is now the filter result and `total_*` the population, everywhere.
+- **Tools that truncate say so.** `find_game` returned a bare array cut to ten with no
+  count at all; `list_library` reported `matched` and left the caller to infer the rest.
+  `wishlist`'s note was worse than missing: it claimed the entries past the enrichment
+  window came back "with appid only" when they were never returned at all.
+- **Nine unguarded reads of a Steam response.** Expressions of the shape `obj?.field.inner`
+  guarded the outer object and not the inner field, so a 200 with an unexpected body
+  produced a TypeError instead of an answer. Steam does this in practice —
+  `GetUserStatsForGame` answers 400 with `{}` — and one of the nine sat three lines below a
+  comment asserting every such read was guarded.
+- **`get_news` accused the owner's API key of being wrong when a game simply had no
+  announcements.** `GetNewsForApp` answers 403 with an empty body both for an unknown appid
+  and for a real game with no feed, which fell into the generic "key is wrong, or the data
+  is private" branch. It now says there is no news feed. `get_news` also gained `appid` and
+  `count`, having previously returned neither.
+- **`achievement_progress` reported upstream failure as fact.** A run where Steam refused
+  every request answered "N of the N games examined reported no achievements" — a claim
+  about the library made when Steam never answered.
+- **`find_game` threw instead of falling through to the store** when the library was
+  private, despite promising library-then-store; `resolve()` already degraded correctly.
+- **`stripMarkup` left hex entities** such as `&#x27;` in news excerpts, and used
+  `fromCharCode` where code points above U+FFFF need `fromCodePoint`.
+- **The GitHub token exchange 500'd on an HTML error page** instead of producing the 400 the
+  surrounding code is built to return.
+- **`wishlist` built a result object for every entry before slicing to `limit`** — 275
+  objects built and discarded on a 300-game wishlist, against a 10 ms CPU budget. The
+  subrequest count is unchanged: still two.
+
+### Testing
+- 168 tests, up from none before 0.4.0. Every one of the 13 tools now has coverage.
+- `test/tools-malformed.test.ts` runs all 13 tools against empty, partial and non-2xx
+  Steam bodies. It found two of the nine unguarded reads that a full code review missed.
+
 ## [0.4.1] — 2026-09-10
 
 Closes a security question that had been open since 0.3.0, plus follow-ups from a code

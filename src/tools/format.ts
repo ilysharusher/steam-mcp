@@ -11,11 +11,18 @@ const ENTITIES: Record<string, string> = {
 export function stripMarkup(html: string): string {
   return html
     .replace(/<[^>]+>/g, " ")
-    .replace(/&(#\d+|[a-zA-Z]+);/g, (whole, entity: string) =>
-      entity.startsWith("#")
-        ? String.fromCharCode(Number(entity.slice(1)))
-        : (ENTITIES[entity.toLowerCase()] ?? whole),
-    )
+    // Hex entities (&#x27;) are as common as decimal ones in Steam's markup, and
+    // fromCodePoint rather than fromCharCode because emoji in patch notes are
+    // above U+FFFF, where fromCharCode silently produces the wrong character.
+    .replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z]+);/g, (whole, entity: string) => {
+      if (!entity.startsWith("#")) return ENTITIES[entity.toLowerCase()] ?? whole;
+      const code = entity.startsWith("#x")
+        ? Number.parseInt(entity.slice(2), 16)
+        : Number(entity.slice(1));
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : whole;
+    })
     .replace(/\s+/g, " ")
     .trim();
 }

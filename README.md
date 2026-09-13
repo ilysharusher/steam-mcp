@@ -14,8 +14,9 @@ TypeScript with Hono for the web layer; the MCP layer is the official SDK plus C
 | `library_stats` | Game count, total and median hours, backlog size, top 10 |
 | `recently_played` | Last two weeks of activity |
 | `find_game` | Name → appid, library first, then the store |
-| `game_details` | Description, release date, developer, genres, Metacritic, price |
-| `get_achievements` | Per-game progress plus global rarity for each achievement |
+| `game_details` | Description, release date, developer, genres, Steam review score, Metacritic, price |
+| `get_achievements` | Per-game progress, global rarity, and which achievements Steam is hiding |
+| `game_stats` | Lifetime counters for one game — kills, wins, time, per-map and per-weapon totals. CS2 reports 184 |
 | `achievement_progress` | Completion across the most-played games (max 15 per call) |
 | `get_news` | News and patch notes |
 | `player_count` | Concurrent players right now |
@@ -168,7 +169,7 @@ src/
 │   ├── context.ts  #   per-request library memo and name resolver
 │   ├── format.ts   #   CC (price region) and news markup stripping
 │   ├── library.ts  #   list_library, library_stats, recently_played, find_game
-│   ├── achievements.ts
+│   ├── achievements.ts  #   get_achievements, achievement_progress, game_stats
 │   ├── store.ts    #   game_details, get_news, player_count
 │   ├── wishlist.ts
 │   └── social.ts   #   profile_status, friends

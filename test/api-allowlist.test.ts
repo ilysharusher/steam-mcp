@@ -38,7 +38,7 @@ describe("SteamMcp re-checks the allowlist on every request", () => {
     const res = await entrypoint("ilysharusher", "ilysharusher").fetch(mcpRequest());
     expect(res.status).not.toBe(403);
     // Proves the request reached the MCP layer rather than failing some other
-    // way: only the handler answers tools/list, and it lists all twelve.
+    // way: only the handler answers tools/list, and it lists all thirteen.
     const body = await res.text();
     expect(body).toContain("list_library");
     expect(body).toContain("wishlist");

@@ -36,8 +36,10 @@ export async function exchangeCode(
       redirect_uri: callbackUrl,
     }),
   });
-  const body = (await res.json()) as { access_token?: string };
-  return body.access_token ?? null;
+  // A GitHub 5xx serves an HTML page, and res.json() would throw a SyntaxError
+  // that surfaces as a 500 — losing the deliberate 400 the caller produces.
+  const body = await res.json<{ access_token?: string }>().catch(() => null);
+  return body?.access_token ?? null;
 }
 
 export async function fetchProfile(token: string): Promise<GithubUser | null> {
@@ -49,5 +51,5 @@ export async function fetchProfile(token: string): Promise<GithubUser | null> {
     },
   });
   if (!res.ok) return null;
-  return (await res.json()) as GithubUser;
+  return await res.json<GithubUser>().catch(() => null);
 }

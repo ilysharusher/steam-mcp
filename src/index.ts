@@ -20,13 +20,13 @@ export class SteamMcp extends WorkerEntrypoint<Env, Props> {
     // config change, so without this a login removed from ALLOWED_GITHUB_LOGINS
     // would keep working until its token expired. Costs no subrequest: props are
     // already decrypted by the provider.
-    if (!isAllowed(this.env, this.ctx.props.login)) {
+    if (!isAllowed(this.env, this.ctx.props?.login ?? "")) {
       return new Response("Forbidden", { status: 403 });
     }
 
     const handler = createMcpHandler(
       () => {
-        const server = new McpServer({ name: "steam-mcp", version: "0.4.1" });
+        const server = new McpServer({ name: "steam-mcp", version: "0.5.0" });
         registerTools(server, {
           apiKey: this.env.STEAM_API_KEY,
           steamId: this.env.STEAM_ID,

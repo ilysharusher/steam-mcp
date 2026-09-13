@@ -114,6 +114,33 @@ export function storeDetails(appid: number, cc: string) {
 }
 
 /**
+ * Steam's own review summary. `num_per_page=0` asks for the counts without a
+ * single review body, which keeps the whole reply around 200 bytes. Undocumented
+ * like the other storefront paths, so callers must tolerate it failing.
+ */
+export function appReviews(appid: number) {
+  const url = new URL(`${STORE}/appreviews/${appid}`);
+  url.searchParams.set("json", "1");
+  url.searchParams.set("language", "all");
+  url.searchParams.set("purchase_type", "all");
+  url.searchParams.set("num_per_page", "0");
+  return getJson<{ query_summary?: ReviewSummary }>(url);
+}
+
+/**
+ * Achievement and stat definitions for a game. The only place Steam exposes the
+ * `hidden` flag: GetPlayerAchievements omits the description of a hidden
+ * achievement without saying why. The schema does not reveal the description
+ * either — Valve withholds it until the achievement is unlocked — so this is
+ * used to label, not to recover.
+ */
+export function gameSchema(cfg: SteamConfig, appid: number) {
+  return api<{
+    game?: { availableGameStats?: { achievements?: SchemaAchievement[] } };
+  }>(cfg, "ISteamUserStats/GetSchemaForGame/v2/", { appid, l: "english" });
+}
+
+/**
  * Wishlist contents. The storefront path `/wishlist/profiles/<id>/wishlistdata/`
  * is dead — Valve now 302s it to HTML — so this goes through the documented
  * service instead. It returns appids only; names and prices come from
@@ -200,7 +227,6 @@ export interface StoreItem {
   id?: number;
   /** 1 on success; anything else means the item is unavailable here. */
   success?: number;
-  visible?: boolean;
   name?: string;
   is_free?: boolean;
   release?: { steam_release_date?: number; is_coming_soon?: boolean };
@@ -218,6 +244,24 @@ export interface PlayerAchievement {
   unlocktime: number;
   name?: string;
   description?: string;
+}
+
+export interface ReviewSummary {
+  review_score_desc?: string;
+  total_positive?: number;
+  total_negative?: number;
+  total_reviews?: number;
+}
+
+export interface SchemaAchievement {
+  name: string;
+  hidden?: number;
+}
+
+/** One lifetime counter from GetUserStatsForGame. CS2 reports 184 of them. */
+export interface GameStat {
+  name: string;
+  value: number;
 }
 
 // --- formatting --------------------------------------------------------------

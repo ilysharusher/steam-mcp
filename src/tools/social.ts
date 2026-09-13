@@ -32,7 +32,9 @@ export function registerSocialTools(server: McpServer, { cfg }: ToolContext) {
         }>(cfg, "ISteamUser/GetPlayerBans/v1/", { steamids: cfg.steamId }).catch(() => null),
       ]);
 
-      const p = summary.response.players[0];
+      // Steam has answered 200 with the players array missing entirely; every
+      // read of it is guarded so that shape is an 'unknown', not a 500.
+      const p = summary.response?.players?.[0];
       const states = ["offline", "online", "busy", "away", "snooze", "looking to trade", "looking to play"];
 
       return json({
@@ -43,9 +45,9 @@ export function registerSocialTools(server: McpServer, { cfg }: ToolContext) {
         playing_now: p?.gameextrainfo ?? null,
         last_logoff: day(p?.lastlogoff),
         account_created: day(p?.timecreated),
-        steam_level: level?.response.player_level ?? null,
-        vac_banned: bans?.players[0]?.VACBanned ?? null,
-        game_bans: bans?.players[0]?.NumberOfGameBans ?? null,
+        steam_level: level?.response?.player_level ?? null,
+        vac_banned: bans?.players?.[0]?.VACBanned ?? null,
+        game_bans: bans?.players?.[0]?.NumberOfGameBans ?? null,
       });
     },
   );
@@ -75,8 +77,11 @@ export function registerSocialTools(server: McpServer, { cfg }: ToolContext) {
       });
 
       if (!list) {
+        // Same shape as every other return from this tool: a caller should not
+        // have to branch on which failure it hit to read the count.
         return json({
           count: 0,
+          total_friends: 0,
           friends: [],
           note: "Steam would not serve this friends list — its privacy setting is not public.",
         });
@@ -100,22 +105,37 @@ export function registerSocialTools(server: McpServer, { cfg }: ToolContext) {
         };
       }>(cfg, "ISteamUser/GetPlayerSummaries/v2/", { steamids: ids.join(",") });
 
-      const players = summaries.response.players
+      const matching = (summaries.response?.players ?? [])
         .filter((p) => !online_only || p.personastate !== 0)
         .map((p) => ({
           name: p.personaname,
           online: p.personastate !== 0,
           playing: p.gameextrainfo ?? null,
         }));
+      const friends = matching.slice(0, limit);
+
+      const notes: string[] = [];
+      if (all.length > SUMMARY_BATCH) {
+        notes.push(
+          `Checked the first ${SUMMARY_BATCH} of ${all.length} friends; Steam serves at most that many per call.`,
+        );
+      }
+      if (matching.length > friends.length) {
+        notes.push(
+          online_only
+            ? `Showing ${friends.length} of ${matching.length} matches.`
+            : `Showing ${friends.length} of ${matching.length} friends.`,
+        );
+      }
 
       return json({
-        count: players.length,
+        // count is what came back; matched is how many passed online_only;
+        // total_friends is the whole list. Three numbers, never conflated.
+        count: friends.length,
+        ...(online_only ? { matched: matching.length } : {}),
         total_friends: all.length,
-        friends: players.slice(0, limit),
-        note:
-          all.length > SUMMARY_BATCH
-            ? `Checked the first ${SUMMARY_BATCH} of ${all.length} friends; Steam serves at most that many per call.`
-            : undefined,
+        friends,
+        note: notes.length ? notes.join(" ") : undefined,
       });
     },
   );
