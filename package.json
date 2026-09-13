@@ -14,7 +14,7 @@
     "tail": "wrangler tail",
     "inspector": "npx @modelcontextprotocol/inspector@latest"
   },
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@modelcontextprotocol/server": "^2.0.0",
